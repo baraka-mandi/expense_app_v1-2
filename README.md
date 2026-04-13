@@ -1,4 +1,4 @@
-# 💳 ExpenseIQ — Personal Expense Management System
+# 💳 Expense Tracker — Personal Expense Management System
 
 A full-stack personal finance app with AI-powered natural language transaction management,
 built with Python Flask, Streamlit, SQLite3, and Ollama (gemma3:1b).

@@ -231,7 +231,7 @@ def auth_page():
     with col2:
         st.markdown("""
         <div style='text-align:center; padding: 2rem 0 1rem;'>
-            <div class='logo'>💳 ExpenseIQ</div>
+            <div class='logo'>💳 Expense Tracker</div>
             <div class='logo-sub'>Personal Finance Intelligence</div>
         </div>
         """, unsafe_allow_html=True)
@@ -563,7 +563,7 @@ def llm_page():
                 content_html = msg['content'].replace("\n", "<br>")
                 st.markdown(f"""
                 <div class='chat-msg chat-ai'>
-                    <div class='chat-ai-header'>✦ ExpenseIQ AI</div>
+                    <div class='chat-ai-header'>✦ Expense Tracker AI</div>
                     {content_html}
                 </div>""", unsafe_allow_html=True)
 
