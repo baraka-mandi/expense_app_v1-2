@@ -8,7 +8,7 @@ import requests
 import json
 
 OLLAMA_BASE = "http://127.0.0.1:11434"
-MODEL       = "gemma3:1b"
+MODEL       = "gemma3:4b"
 
 print("=" * 55)
 print("ExpenseIQ — Ollama Connection Test")

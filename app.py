@@ -79,6 +79,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS Users (
             user_id    INTEGER PRIMARY KEY AUTOINCREMENT,
             username   VARCHAR(50) UNIQUE NOT NULL,
+            email      VARCHAR(100),
             password   VARCHAR(255) NOT NULL,
             balance    DECIMAL(12,2) DEFAULT 0.00,
             last_login DATETIME
@@ -138,6 +139,14 @@ def init_db():
             username TEXT NOT NULL
         )
     """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS ResetTokens (
+            token      TEXT PRIMARY KEY,
+            user_id    INTEGER NOT NULL,
+            expires_at DATETIME NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES Users(user_id)
+        )
+    """)
     conn.commit()
 
     # Migration: add budget_id to Transactions if it predates that column.
@@ -146,6 +155,12 @@ def init_db():
         conn.execute(
             "ALTER TABLE Transactions ADD COLUMN budget_id INTEGER REFERENCES Budget(budget_id)"
         )
+        conn.commit()
+
+    # Migration: add email to Users if it predates that column.
+    user_cols = {row[1] for row in conn.execute("PRAGMA table_info(Users)").fetchall()}
+    if "email" not in user_cols:
+        conn.execute("ALTER TABLE Users ADD COLUMN email VARCHAR(100)")
         conn.commit()
 
     # Migration: fix corrupted Transactions table that points to _Budget_old
@@ -316,6 +331,7 @@ def recalculate_balance(conn, user_id):
 def register():
     data     = request.get_json(force=True, silent=True) or {}
     username = (data.get("username") or "").strip()
+    email    = (data.get("email") or "").strip()
     password = data.get("password") or ""
 
     err = validate_username(username)
@@ -328,14 +344,74 @@ def register():
     conn = get_db()
     try:
         cursor = conn.execute(
-            "INSERT INTO Users (username, password) VALUES (?, ?)",
-            (username, hash_password(password))
+            "INSERT INTO Users (username, email, password) VALUES (?, ?, ?)",
+            (username, email, hash_password(password))
         )
         seed_default_categories(conn, cursor.lastrowid)
         conn.commit()
         return jsonify({"message": "User registered successfully"}), 201
     except sqlite3.IntegrityError:
         return jsonify({"error": "Username already exists"}), 409
+
+@app.route("/api/forgot-password", methods=["POST"])
+def forgot_password():
+    data = request.get_json(force=True, silent=True) or {}
+    email = (data.get("email") or "").strip()
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
+
+    conn = get_db()
+    user = conn.execute("SELECT * FROM Users WHERE email = ?", (email,)).fetchone()
+    if user:
+        token = secrets.token_hex(16)
+        expires_at = (datetime.now() + timedelta(hours=1)).isoformat()
+        conn.execute("INSERT INTO ResetTokens (token, user_id, expires_at) VALUES (?, ?, ?)", 
+                     (token, user["user_id"], expires_at))
+        conn.commit()
+        
+        # Write to local file to simulate email
+        email_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "emails.txt")
+        with open(email_file, "a") as f:
+            f.write(f"--- Password Reset Email ---\n")
+            f.write(f"To: {email}\n")
+            f.write(f"Subject: Password Reset Request\n")
+            f.write(f"Body: Hello {user['username']},\n")
+            f.write(f"You requested a password reset. Please use the following token to reset your password:\n")
+            f.write(f"Token: {token}\n")
+            f.write(f"Date: {datetime.now().isoformat()}\n")
+            f.write(f"----------------------------\n\n")
+
+    # Always return success to prevent email enumeration
+    return jsonify({"message": "If that email exists, a reset link has been sent to it."})
+
+@app.route("/api/reset-password", methods=["POST"])
+def reset_password():
+    data = request.get_json(force=True, silent=True) or {}
+    token = (data.get("token") or "").strip()
+    new_password = data.get("new_password") or ""
+
+    if not token or not new_password:
+        return jsonify({"error": "Token and new password are required"}), 400
+    
+    err = validate_password(new_password)
+    if err:
+        return jsonify({"error": err}), 400
+
+    conn = get_db()
+    reset = conn.execute("SELECT * FROM ResetTokens WHERE token = ?", (token,)).fetchone()
+    if not reset:
+        return jsonify({"error": "Invalid or expired token"}), 400
+        
+    if datetime.fromisoformat(reset["expires_at"]) < datetime.now():
+        conn.execute("DELETE FROM ResetTokens WHERE token = ?", (token,))
+        conn.commit()
+        return jsonify({"error": "Invalid or expired token"}), 400
+
+    conn.execute("UPDATE Users SET password = ? WHERE user_id = ?", 
+                 (hash_password(new_password), reset["user_id"]))
+    conn.execute("DELETE FROM ResetTokens WHERE user_id = ?", (reset["user_id"],))
+    conn.commit()
+    return jsonify({"message": "Password reset successfully"})
 
 @app.route("/api/login", methods=["POST"])
 def login():
@@ -515,7 +591,7 @@ def get_transactions():
     if budget_id:
         query += " AND budget_id = ?"; params.append(int(budget_id))
 
-    query += " ORDER BY transaction_date DESC"
+    query += " ORDER BY transaction_date DESC, last_update DESC"
 
     conn = get_db()
     rows = conn.execute(query, params).fetchall()

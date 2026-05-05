@@ -1,0 +1,93 @@
+=========================================================
+ExpenseIQ: Tech Stack & Architecture Overview
+=========================================================
+
+1. TECH STACK
+-------------
+• Frontend: Streamlit (Python) - A rapid UI framework for data-centric apps.
+• Backend: Flask (Python) - A lightweight WSGI web application framework.
+• Database: SQLite3 - A serverless, self-contained SQL database engine.
+• AI / LLM Engine: Ollama - A local LLM runner executing the 'gemma3:4b' model.
+
+2. SYSTEM ARCHITECTURE
+----------------------
+The application follows a decoupled, three-tier architecture:
+
+  [ Streamlit UI ]  <--(HTTP REST)-->  [ Flask API ]
+                                            |
+                                    (Internal bindings)
+                                       /          \
+                             [ SQLite DB ]    [ Ollama / Gemma3 ]
+
+• Client-Server Separation: The Streamlit frontend and Flask backend operate independently. They communicate exclusively via RESTful JSON APIs.
+• Stateless Authentication: The backend uses token-based authentication. Streamlit stores the token in its session state and passes it via the 'X-Auth-Token' header on every API call.
+• AI Proxy Pattern: The Streamlit UI does not talk to the LLM directly. Instead, it sends the user's natural language request to Flask. Flask retrieves the user's recent DB context, constructs a highly specific prompt, calls the local Ollama server, parses the AI's JSON response, executes the corresponding database changes, and returns the final updated state to the UI.
+
+3. CRITICAL CONNECTION POINTS (CODE SNIPPETS)
+---------------------------------------------
+
+A. Frontend connecting to Backend (Streamlit -> Flask)
+------------------------------------------------------
+File: frontend.py
+Streamlit uses the `requests` library to act as an API client, maintaining a session for connection pooling.
+
+```python
+API = "http://127.0.0.1:5000/api"
+SESSION = requests.Session()
+
+def api(method: str, path: str, **kwargs):
+    headers = kwargs.pop("headers", {})
+    headers["Content-Type"] = "application/json"
+    
+    # Attach Auth Token if user is logged in
+    if st.session_state.get("token"):
+        headers["X-Auth-Token"] = st.session_state.token
+        
+    # Make the HTTP request to the Flask server
+    r = SESSION.request(method, f"{API}{path}", headers=headers, timeout=90, **kwargs)
+    return r.json(), r.status_code
+```
+
+B. Backend connecting to Database (Flask -> SQLite3)
+------------------------------------------------------
+File: app.py
+Flask establishes a per-request SQLite connection stored in the `g` object, ensuring thread safety and automatic cleanup.
+
+```python
+def get_db():
+    """Return the per-request DB connection stored in Flask g."""
+    if "db" not in g:
+        g.db = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+        g.db.row_factory = sqlite3.Row # Allows dictionary-like access to rows
+        g.db.execute("PRAGMA journal_mode=WAL") # Enables concurrent reads/writes
+        g.db.execute("PRAGMA foreign_keys = ON") # Enforces relational constraints
+    return g.db
+
+@app.teardown_appcontext
+def close_db(error):
+    """Always called at end of every request — closes the connection."""
+    db = g.pop("db", None)
+    if db is not None:
+        db.close()
+```
+
+C. Backend connecting to AI (Flask -> Ollama)
+------------------------------------------------------
+File: app.py
+Flask acts as the orchestrator, reaching out to the local Ollama daemon via an HTTP POST request to perform inference.
+
+```python
+OLLAMA_URL   = "http://localhost:11434/api/generate"
+OLLAMA_MODEL = "gemma3:4b"
+
+def call_ollama(prompt):
+    resp = http_requests.post(OLLAMA_URL, json={
+        "model":   OLLAMA_MODEL,
+        "prompt":  prompt,
+        "stream":  False,
+        "options": {"temperature": 0.1} # Low temperature for structured JSON output
+    }, timeout=60)
+    
+    if resp.status_code == 200:
+        return resp.json().get("response", "")
+```

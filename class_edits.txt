@@ -1,0 +1,15 @@
+1. Update the Flask backend (app.py) to add the new endpoints 
+for /api/forgot-password and /api/reset-password and handle the 
+simulated email writing mechanism.
+
+The app now sends a passsword reset token to user's email 
+Since the app doesnt have access to email I have simulated this
+by dropping the token on a txt file (emails.txt)
+
+2. I have added timestamp on when recording new transaction
+Example record:
+transaction_id  user_id  type    category       amount  description                   transaction_date            timestamp_update                 budget_id
+--------------  -------  ------  -------------  ------  ----------------------------  --------------------------  --------------------------        ---------
+45              7        DEBIT   General        800     Unplanned Groceries           2026-05-04                  2026-05-05T15:59:35.877639        2
+
+
