@@ -13,3 +13,6 @@ transaction_id  user_id  type    category       amount  description             
 45              7        DEBIT   General        800     Unplanned Groceries           2026-05-04                  2026-05-05T15:59:35.877639        2
 
 
+3. Order transactions by DateTime on Dashboard -- doesnt
+
+4. Removed Delete Category button on Category page and replaced it with Edit Category
